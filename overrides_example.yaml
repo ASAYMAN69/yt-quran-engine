@@ -1,0 +1,20 @@
+# Manual Overrides Configuration Example
+
+# Force a boundary after a specific ayah (e.g. Surah Yusuf 12:29)
+force_boundary_after:
+  - surah: 12
+    ayah: 29
+    reason: "Episode break: Conclusion of the palace accusation narrative before women of city enter."
+
+# Keep an ayah range together in a single video
+keep_together:
+  - surah: 12
+    start_ayah: 23
+    end_ayah: 29
+    reason: "Intact narrative episode of Yusuf and Aziz's wife."
+
+# Forbid cutting after a specific ayah
+forbidden_boundary_after:
+  - surah: 2
+    ayah: 282
+    reason: "Ayat Ad-Dayn is indivisible."

@@ -1,0 +1,24 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.coverage
+htmlcov/
+.venv/
+venv/
+env/
+
+# Project temporary render and output videos
+temp_render/
+cache/audio/*.mp3
+output/videos/*.mp4
+output/reports/
+.codegraph/
+.omo/
+
+# OS / Editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/

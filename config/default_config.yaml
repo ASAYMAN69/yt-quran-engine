@@ -1,0 +1,50 @@
+# Quran Daily Dose — Segmentation Engine Configuration
+
+duration:
+  target_seconds: 40.0
+  min_preferred_seconds: 35.0
+  max_preferred_seconds: 45.0
+  min_acceptable_seconds: 25.0
+  max_acceptable_seconds: 55.0
+  hard_min_seconds: 10.0
+  hard_max_seconds: 80.0
+
+weights:
+  # Duration scoring weight (relative to semantic quality)
+  duration_weight: 1.0
+  # Semantic boundary score weight (at segment end)
+  semantic_weight: 1.6
+  # Surah boundary bonus (natural preference to end at surah end if timing permits)
+  surah_boundary_bonus: 0.8
+  # Ruku boundary bonus (traditional Islamic thematic paragraph break)
+  ruku_boundary_bonus: 0.5
+  # Cross-surah penalty (penalty for combining different surahs into one video)
+  cross_surah_penalty: 1.2
+  # Bad split penalty (penalty for breaking inside a tight grammatical/narrative unit)
+  tight_connection_penalty: 2.0
+
+rules:
+  allow_cross_surah: true
+  # For very short surahs (< 20 seconds), allow combining with adjacent short surahs if semantically acceptable
+  combine_short_surahs: true
+  max_short_surah_stand_alone_duration: 25.0
+  # Long ayah exception handling: allow single ayah segments to exceed max duration without harsh penalty
+  allow_single_ayah_exception: true
+  # Maximum ayahs to consider in a single candidate segment
+  max_ayahs_per_segment: 20
+
+dataset:
+  arabic_path: "data/quran_ar_uthmani.json"
+  english_path: "data/quran_en_sahih.json"
+  meta_path: "data/quran_meta.json"
+  timing_path: "data/quran_timing_alafasy.json"
+  # Fallback recitation words-per-minute for estimated durations if timing data is missing
+  fallback_wpm: 65.0
+  # Fallback chars-per-second
+  fallback_cps: 8.5
+
+output:
+  output_dir: "output"
+  json_manifest_filename: "quran_daily_dose_segments.json"
+  report_filename: "segmentation_report.md"
+  qc_report_filename: "quality_control_report.md"
