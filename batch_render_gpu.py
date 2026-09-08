@@ -128,6 +128,7 @@ def render_single_video(
             durations=durations,
             ass_subtitles_path=ass_path,
             output_mp4_path=temp_main_mp4,
+            use_nvenc=use_nvenc,
         )
 
         # 4. Attach Hook Intro

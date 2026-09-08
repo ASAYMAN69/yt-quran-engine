@@ -64,6 +64,7 @@ class YouTubeVideoClipComposer:
         video_clips: Optional[List[Path]] = None,
         canvas_mode: str = "vertical_with_1x1_middle",
         dark_overlay_opacity: float = 0.38,
+        use_nvenc: bool = False,
     ) -> Path:
         """
         Takes real video footage clips, crops to 1:1 square, centers in the frame, and adds a dark overlay.
@@ -80,6 +81,7 @@ class YouTubeVideoClipComposer:
         rendered_segments: List[Path] = []
         fps = 30
         trans_duration = 0.45 if len(durations) > 1 else 0.0
+        vcodec_args = ["-c:v", "h264_nvenc", "-preset", "p4", "-cq", "21"] if use_nvenc else ["-c:v", "libx264", "-preset", "veryfast", "-crf", "20"]
 
         print(f"🎬 Processing {len(ayahs)} real video clips with 1:1 center framing, {int(dark_overlay_opacity*100)}% dark overlay, and smooth crossfades...")
 
@@ -124,9 +126,7 @@ class YouTubeVideoClipComposer:
                 "-i", str(v_clip.resolve()),
                 "-filter_complex", vf_filter,
                 "-t", str(seg_dur),
-                "-c:v", "libx264",
-                "-preset", "veryfast",
-                "-crf", "20",
+                *vcodec_args,
                 "-pix_fmt", "yuv420p",
                 "-r", str(fps),
                 "-an",
@@ -156,9 +156,7 @@ class YouTubeVideoClipComposer:
                 "-filter_complex", f"{pbar_src}[pbar];[0:v][pbar]overlay=0:1492:format=auto[v_pbar];[v_pbar]ass='{subtitles_str}':fontsdir='{fonts_dir_str}'[out_v]",
                 "-map", "[out_v]",
                 "-map", "1:a",
-                "-c:v", "libx264",
-                "-preset", "veryfast",
-                "-crf", "20",
+                *vcodec_args,
                 "-c:a", "aac",
                 "-b:a", "192k",
                 "-pix_fmt", "yuv420p",
@@ -196,9 +194,7 @@ class YouTubeVideoClipComposer:
                 "-filter_complex", ";".join(filter_chain),
                 "-map", "[out_v]",
                 "-map", f"{audio_idx}:a",
-                "-c:v", "libx264",
-                "-preset", "veryfast",
-                "-crf", "20",
+                *vcodec_args,
                 "-c:a", "aac",
                 "-b:a", "192k",
                 "-pix_fmt", "yuv420p",
