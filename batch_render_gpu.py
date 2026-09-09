@@ -79,7 +79,7 @@ def attach_hook_intro(
 
 def render_single_video_worker(
     target_video: VideoSegment,
-    ayah_data: List[dict],
+    ayahs: List[Ayah],
     output_dir_str: str,
     clips_dir: str = "assets/youtube_clips",
     fonts_dir: str = "assets/fonts",
@@ -103,9 +103,6 @@ def render_single_video_worker(
     local_out_mp4 = temp_dir / f"final_{video_id:04d}.mp4"
 
     try:
-        from quran_engine.quran.models import Ayah
-        ayahs = [Ayah(**ad) for ad in ayah_data]
-
         # 1. Prepare Audio (Cached)
         audio_pipeline = AudioPipeline(cache_dir="cache/audio")
         audio_path, durations = audio_pipeline.prepare_segment_audio(
@@ -208,8 +205,7 @@ def main():
         if vid in video_map:
             v_seg = video_map[vid]
             ayah_objs = [engine.quran.get_by_key(k) for k in v_seg.ayah_keys]
-            ayah_data = [a.model_dump() for a in ayah_objs]
-            target_jobs.append((v_seg, ayah_data))
+            target_jobs.append((v_seg, ayah_objs))
         else:
             print(f"⚠️ Video ID {vid} not found in Quran segmentation.")
 
@@ -231,7 +227,7 @@ def main():
                 executor.submit(
                     render_single_video_worker,
                     v_seg,
-                    ayah_data,
+                    ayah_objs,
                     str(output_dir),
                     args.clips_dir,
                     "assets/fonts",
@@ -239,7 +235,7 @@ def main():
                     use_nvenc,
                     args.force_rerender,
                 ): v_seg.video_id
-                for (v_seg, ayah_data) in target_jobs
+                for (v_seg, ayah_objs) in target_jobs
             }
 
             for future in as_completed(future_to_id):
@@ -261,10 +257,10 @@ def main():
                 finally:
                     pbar.update(1)
     else:
-        for (v_seg, ayah_data) in target_jobs:
+        for (v_seg, ayah_objs) in target_jobs:
             v_id, status, elapsed = render_single_video_worker(
                 v_seg,
-                ayah_data,
+                ayah_objs,
                 str(output_dir),
                 args.clips_dir,
                 "assets/fonts",
