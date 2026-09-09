@@ -1,10 +1,11 @@
 """
-High-Speed GPU/Multi-Core Batch Renderer for Full Quran Reels.
+High-Speed Cloud & Multi-Core Batch Renderer for Full Quran Reels.
 Optimized for Google Colab (T4 / A100 / CPU) & local multi-processing.
 """
 
 import argparse
 import os
+import shutil
 import subprocess
 import sys
 import time
@@ -12,10 +13,13 @@ from concurrent.futures import ProcessPoolExecutor, as_completed
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
+from tqdm import tqdm
+
 from quran_engine.pipeline import QuranSegmentationEngine
 from quran_engine.renderer.audio import AudioPipeline
 from quran_engine.renderer.subtitles import SubtitleGenerator
 from quran_engine.renderer.video_clip_composer import YouTubeVideoClipComposer
+from quran_engine.segmentation.models import VideoSegment
 
 
 def check_nvenc_available() -> bool:
@@ -73,36 +77,36 @@ def attach_hook_intro(
     return output_path
 
 
-def render_single_video(
-    video_id: int,
-    output_dir: Path,
+def render_single_video_worker(
+    target_video: VideoSegment,
+    ayah_data: List[dict],
+    output_dir_str: str,
     clips_dir: str = "assets/youtube_clips",
     fonts_dir: str = "assets/fonts",
     hook_video: Optional[str] = "assets/hooks/hook_stop_doomscrolling.mp4",
     use_nvenc: bool = False,
     force_rerender: bool = False,
 ) -> Tuple[int, str, float]:
-    """Renders a single Quran video reel with auto-resume, ASS subtitles, and hook attachment."""
+    """Worker function to render a single video with local fast SSD buffering and atomic sync to Google Drive."""
+    video_id = target_video.video_id
     start_time = time.time()
-    out_file = output_dir / f"video_{video_id:04d}.mp4"
+    output_dir = Path(output_dir_str)
+    final_destination = output_dir / f"video_{video_id:04d}.mp4"
 
-    # Auto-resume check
-    if not force_rerender and out_file.exists() and out_file.stat().st_size > 1_000_000:
+    # Auto-resume check: Skip if already rendered
+    if not force_rerender and final_destination.exists() and final_destination.stat().st_size > 1_000_000:
         return video_id, "SKIPPED", 0.0
 
+    # Fast local scratch directory
     temp_dir = Path(f"temp_render/v_{video_id:04d}")
     temp_dir.mkdir(parents=True, exist_ok=True)
+    local_out_mp4 = temp_dir / f"final_{video_id:04d}.mp4"
 
     try:
-        engine = QuranSegmentationEngine()
-        result, _ = engine.run_full_quran(export_outputs=False)
-        target_video = next((v for v in result.videos if v.video_id == video_id), None)
-        if not target_video:
-            return video_id, f"ERROR: Video ID {video_id} not found", 0.0
+        from quran_engine.quran.models import Ayah
+        ayahs = [Ayah(**ad) for ad in ayah_data]
 
-        ayahs = [engine.quran.get_by_key(k) for k in target_video.ayah_keys]
-
-        # 1. Prepare Audio
+        # 1. Prepare Audio (Cached)
         audio_pipeline = AudioPipeline(cache_dir="cache/audio")
         audio_path, durations = audio_pipeline.prepare_segment_audio(
             ayahs=ayahs,
@@ -118,7 +122,7 @@ def render_single_video(
             output_ass_path=temp_dir / f"subtitles_{video_id:04d}.ass",
         )
 
-        # 3. Render Recitation Video
+        # 3. Composite Real Video Footage Clips
         composer = YouTubeVideoClipComposer(fonts_dir=fonts_dir, video_clips_dir=clips_dir)
         temp_main_mp4 = temp_dir / f"main_{video_id:04d}.mp4"
         composer.render_verse_video(
@@ -131,16 +135,20 @@ def render_single_video(
             use_nvenc=use_nvenc,
         )
 
-        # 4. Attach Hook Intro
+        # 4. Prepend Reusable Hook Intro
         if hook_video and Path(hook_video).exists():
             attach_hook_intro(
                 hook_video_path=Path(hook_video),
                 main_video_path=temp_main_mp4,
-                output_path=out_file,
+                output_path=local_out_mp4,
                 use_nvenc=use_nvenc,
             )
         else:
-            temp_main_mp4.replace(out_file)
+            temp_main_mp4.replace(local_out_mp4)
+
+        # 5. Atomic Sync to Google Drive / Output Directory
+        final_destination.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(local_out_mp4, final_destination)
 
         elapsed = time.time() - start_time
         return video_id, "SUCCESS", elapsed
@@ -148,7 +156,7 @@ def render_single_video(
     except Exception as e:
         return video_id, f"ERROR: {str(e)}", time.time() - start_time
     finally:
-        # Cleanup temp directory
+        # Cleanup local scratch files
         if temp_dir.exists():
             for f in temp_dir.glob("*"):
                 try:
@@ -162,10 +170,10 @@ def render_single_video(
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Batch GPU/Multi-Core Quran Video Reel Exporter.")
+    parser = argparse.ArgumentParser(description="High-Speed Batch Quran Video Reel Exporter.")
     parser.add_argument("--start-id", type=int, default=1, help="Starting video ID (default: 1)")
     parser.add_argument("--end-id", type=int, default=10, help="Ending video ID inclusive (default: 10)")
-    parser.add_argument("--output-dir", type=str, default="output/videos", help="Target output directory for videos")
+    parser.add_argument("--output-dir", type=str, default="output/videos", help="Target output directory")
     parser.add_argument("--workers", type=int, default=2, help="Number of concurrent rendering workers (default: 2)")
     parser.add_argument("--clips-dir", type=str, default="assets/youtube_clips", help="Clips directory")
     parser.add_argument("--hook-video", type=str, default="assets/hooks/hook_stop_doomscrolling.mp4", help="Hook video path")
@@ -179,90 +187,116 @@ def main():
     nvenc_supported = check_nvenc_available()
     use_nvenc = args.use_nvenc or nvenc_supported
 
-    print("=" * 70)
-    print("🎬 QURAN REELS BATCH EXPORTER (GPU / MULTI-CORE ACCELERATED)")
-    print("=" * 70)
+    print("=" * 75)
+    print("🎬 QURAN REELS HIGH-SPEED CLOUD EXPORTER (GPU / MULTI-CORE OPTIMIZED)")
+    print("=" * 75)
     print(f"📌 Video ID Range: {args.start_id} to {args.end_id} (Total: {args.end_id - args.start_id + 1} videos)")
-    print(f"📂 Output Directory: {output_dir}")
-    print(f"⚡ Workers: {args.workers}")
-    print(f"🚀 Hardware NVENC GPU Acceleration: {'ENABLED' if use_nvenc else 'DISABLED (Using Multi-Threaded libx264)'}")
+    print(f"📂 Output Destination: {output_dir}")
+    print(f"⚡ Concurrency: {args.workers} Parallel Worker(s)")
+    print(f"🚀 Hardware Acceleration: {'NVIDIA NVENC (GPU)' if use_nvenc else 'Multi-Core CPU (libx264 veryfast)'}")
     print(f"🔄 Auto-Resume (Skip existing): {'OFF' if args.force_rerender else 'ON'}")
-    print("=" * 70)
+    print("=" * 75)
 
-    video_ids = list(range(args.start_id, args.end_id + 1))
-    results: Dict[int, Tuple[str, float]] = {}
+    print("\n📦 Pre-loading Quran Segmentation Engine once into memory...")
+    engine = QuranSegmentationEngine()
+    result, _ = engine.run_full_quran(export_outputs=False)
+    video_map = {v.video_id: v for v in result.videos}
+    print(f"✅ Loaded {len(video_map)} total segmented reels successfully.")
 
+    target_jobs = []
+    for vid in range(args.start_id, args.end_id + 1):
+        if vid in video_map:
+            v_seg = video_map[vid]
+            ayah_objs = [engine.quran.get_by_key(k) for k in v_seg.ayah_keys]
+            ayah_data = [a.model_dump() for a in ayah_objs]
+            target_jobs.append((v_seg, ayah_data))
+        else:
+            print(f"⚠️ Video ID {vid} not found in Quran segmentation.")
+
+    if not target_jobs:
+        print("❌ No valid videos to render in the specified range.")
+        return
+
+    print(f"\n🚀 Starting batch export of {len(target_jobs)} videos with live progress...\n")
     batch_start = time.time()
-    completed_count = 0
-    skipped_count = 0
-    failed_count = 0
+    completed = 0
+    skipped = 0
+    failed = 0
+
+    pbar = tqdm(total=len(target_jobs), desc="Rendering Quran Reels", unit="video")
 
     if args.workers > 1:
         with ProcessPoolExecutor(max_workers=args.workers) as executor:
             future_to_id = {
                 executor.submit(
-                    render_single_video,
-                    vid,
-                    output_dir,
+                    render_single_video_worker,
+                    v_seg,
+                    ayah_data,
+                    str(output_dir),
                     args.clips_dir,
                     "assets/fonts",
                     args.hook_video,
                     use_nvenc,
                     args.force_rerender,
-                ): vid
-                for vid in video_ids
+                ): v_seg.video_id
+                for (v_seg, ayah_data) in target_jobs
             }
 
             for future in as_completed(future_to_id):
                 vid = future_to_id[future]
                 try:
                     v_id, status, elapsed = future.result()
-                    results[v_id] = (status, elapsed)
                     if status == "SUCCESS":
-                        completed_count += 1
-                        print(f"✅ Video {v_id:04d}: Rendered successfully in {elapsed:.1f}s")
+                        completed += 1
+                        pbar.set_postfix_str(f"Video {v_id:04d} OK ({elapsed:.1f}s)")
                     elif status == "SKIPPED":
-                        skipped_count += 1
-                        print(f"⏩ Video {v_id:04d}: Already exists, skipped.")
+                        skipped += 1
+                        pbar.set_postfix_str(f"Video {v_id:04d} Skipped (Exists)")
                     else:
-                        failed_count += 1
-                        print(f"❌ Video {v_id:04d}: Failed -> {status}")
+                        failed += 1
+                        print(f"\n❌ Video {v_id:04d} Error: {status}")
                 except Exception as e:
-                    failed_count += 1
-                    print(f"❌ Video {vid:04d}: Exception -> {e}")
+                    failed += 1
+                    print(f"\n❌ Video {vid:04d} Exception: {e}")
+                finally:
+                    pbar.update(1)
     else:
-        for vid in video_ids:
-            v_id, status, elapsed = render_single_video(
-                vid,
-                output_dir,
+        for (v_seg, ayah_data) in target_jobs:
+            v_id, status, elapsed = render_single_video_worker(
+                v_seg,
+                ayah_data,
+                str(output_dir),
                 args.clips_dir,
                 "assets/fonts",
                 args.hook_video,
                 use_nvenc,
                 args.force_rerender,
             )
-            results[v_id] = (status, elapsed)
             if status == "SUCCESS":
-                completed_count += 1
-                print(f"✅ Video {v_id:04d}: Rendered successfully in {elapsed:.1f}s")
+                completed += 1
+                pbar.set_postfix_str(f"Video {v_id:04d} OK ({elapsed:.1f}s)")
             elif status == "SKIPPED":
-                skipped_count += 1
-                print(f"⏩ Video {v_id:04d}: Already exists, skipped.")
+                skipped += 1
+                pbar.set_postfix_str(f"Video {v_id:04d} Skipped (Exists)")
             else:
-                failed_count += 1
-                print(f"❌ Video {v_id:04d}: Failed -> {status}")
+                failed += 1
+                print(f"\n❌ Video {v_id:04d} Error: {status}")
+            pbar.update(1)
 
+    pbar.close()
     total_time = time.time() - batch_start
-    print("\n" + "=" * 70)
-    print("🏁 BATCH EXPORT SUMMARY")
-    print("=" * 70)
-    print(f"✅ Successfully Rendered: {completed_count}")
-    print(f"⏩ Skipped (Pre-existing): {skipped_count}")
-    print(f"❌ Failed: {failed_count}")
+
+    print("\n" + "=" * 75)
+    print("🏁 BATCH EXPORT FINISHED")
+    print("=" * 75)
+    print(f"✅ Rendered Successfully: {completed}")
+    print(f"⏩ Skipped (Already on Cloud): {skipped}")
+    print(f"❌ Failed: {failed}")
     print(f"⏱️ Total Wall Time: {total_time:.1f}s ({total_time/60:.2f} mins)")
-    if completed_count > 0:
-        print(f"⚡ Average Speed: {total_time / completed_count:.1f}s per video")
-    print("=" * 70)
+    if completed > 0:
+        print(f"⚡ Average Speed: {total_time / completed:.1f}s per video")
+    print(f"📁 Cloud Output Directory: {output_dir}")
+    print("=" * 75)
 
 
 if __name__ == "__main__":
