@@ -58,7 +58,7 @@ def attach_hook_intro(
         f"[a0][a1]amix=inputs=2:duration=longest[outa]"
     )
 
-    vcodec_args = ["-c:v", "h264_nvenc", "-preset", "p4", "-cq", "21"] if use_nvenc else ["-c:v", "libx264", "-preset", "veryfast", "-crf", "20"]
+    vcodec_args = ["-c:v", "libx264", "-preset", "ultrafast", "-crf", "20", "-threads", "0"]
 
     cmd = [
         "ffmpeg", "-y",

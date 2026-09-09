@@ -81,7 +81,7 @@ class YouTubeVideoClipComposer:
         rendered_segments: List[Path] = []
         fps = 30
         trans_duration = 0.45 if len(durations) > 1 else 0.0
-        vcodec_args = ["-c:v", "h264_nvenc", "-preset", "p4", "-cq", "21"] if use_nvenc else ["-c:v", "libx264", "-preset", "veryfast", "-crf", "20"]
+        vcodec_args = ["-c:v", "libx264", "-preset", "ultrafast", "-crf", "20", "-threads", "0"]
 
         print(f"🎬 Processing {len(ayahs)} real video clips with 1:1 center framing, {int(dark_overlay_opacity*100)}% dark overlay, and smooth crossfades...")
 
