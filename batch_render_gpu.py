@@ -15,6 +15,7 @@ from typing import Dict, List, Optional, Tuple
 
 from tqdm import tqdm
 
+from quran_engine.quran.models import Ayah
 from quran_engine.pipeline import QuranSegmentationEngine
 from quran_engine.renderer.audio import AudioPipeline
 from quran_engine.renderer.subtitles import SubtitleGenerator
